@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PRReviewIQ</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23060f23'/%3E%3Cpath d='M18 22h16c8 0 14 6 14 14s-6 14-14 14H18V22Zm14 20c4 0 6-2.5 6-6s-2-6-6-6h-4v12h4Z' fill='%2379d2ff'/%3E%3Cpath d='M20 14h24' stroke='%234f7cff' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-theme="signal-room">
+    <div class="noise"></div>
+
+    <div class="app-shell">
+      <header class="hero panel">
+        <div class="hero-copy">
+          <div class="hero-topline">
+            <p class="eyebrow">PRReviewIQ / Review Observatory</p>
+            <div class="theme-dock" aria-label="Theme selector">
+              <span class="theme-label">Theme</span>
+              <div class="theme-buttons">
+                <button class="theme-button active" data-theme="signal-room">Signal Room</button>
+                <button class="theme-button" data-theme="ember-ops">Ember Ops</button>
+                <button class="theme-button" data-theme="verdant-grid">Verdant Grid</button>
+              </div>
+            </div>
+          </div>
+
+          <h1>Turn every review into a signal your team can actually reuse.</h1>
+          <p class="hero-copy-text">
+            Review diffs, inspect the exact findings, and build a living standards
+            registry from the patterns your codebase keeps surfacing.
+          </p>
+
+          <div class="hero-band">
+            <span class="hero-chip">Claude review engine</span>
+            <span class="hero-chip">Notion MCP logging</span>
+            <span class="hero-chip">Local FastAPI workflow</span>
+          </div>
+        </div>
+
+        <aside class="hero-console">
+          <div class="console-heading">
+            <div>
+              <p class="console-label">Mission Board</p>
+              <h2>Review pulse</h2>
+            </div>
+            <div class="hero-status">
+              <span class="status-dot"></span>
+              <span>Local dashboard</span>
+            </div>
+          </div>
+
+          <div class="metric-grid">
+            <article class="metric-card">
+              <span class="metric-label">Mode</span>
+              <strong id="statMode">PR Diff</strong>
+            </article>
+            <article class="metric-card">
+              <span class="metric-label">Issues</span>
+              <strong id="statIssues">0</strong>
+            </article>
+            <article class="metric-card">
+              <span class="metric-label">Standards</span>
+              <strong id="statStandards">Pending</strong>
+            </article>
+            <article class="metric-card">
+              <span class="metric-label">Status</span>
+              <strong id="statStatus">Awaiting input</strong>
+            </article>
+          </div>
+
+          <div id="consoleStream" class="console-stream" aria-live="polite">
+            <div class="stream-line">Console online.</div>
+            <div class="stream-line">Run setup to connect the Notion knowledge base.</div>
+            <div class="stream-line">Paste a diff or switch to single-file mode.</div>
+          </div>
+        </aside>
+      </header>
+
+      <main class="workspace">
+        <section class="panel composer">
+          <div class="panel-chrome">
+            <div class="chrome-dots">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <span class="chrome-title">input.console</span>
+          </div>
+
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">Compose</p>
+              <h2>Review Input</h2>
+              <p class="subcopy">
+                Drop in a raw git diff or audit a single file before it ever hits a PR.
+              </p>
+            </div>
+            <div class="mode-switch">
+              <button class="mode-button active" data-mode="diff">PR Diff</button>
+              <button class="mode-button" data-mode="file">Single File</button>
+            </div>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>PR Title</span>
+              <input id="prTitle" type="text" placeholder="Fix flaky login tests" />
+            </label>
+            <label class="field">
+              <span>Repo</span>
+              <input id="repoName" type="text" placeholder="acme-platform" />
+            </label>
+            <label class="field hidden" id="filenameField">
+              <span>Filename</span>
+              <input id="filename" type="text" placeholder="app/api/routes.py" />
+            </label>
+          </div>
+
+          <label class="field textarea-field">
+            <span id="sourceLabel">Raw git diff</span>
+            <textarea
+              id="sourceInput"
+              spellcheck="false"
+              placeholder="Paste the output of git diff main...HEAD here"
+            ></textarea>
+          </label>
+
+          <div class="action-row">
+            <button id="setupBtn" class="secondary-button">Setup Notion KB</button>
+            <button id="reviewBtn" class="primary-button">Run Review</button>
+            <button id="digestBtn" class="ghost-button accent-ghost">Create Weekly Digest</button>
+          </div>
+        </section>
+
+        <section class="panel findings">
+          <div class="panel-chrome">
+            <div class="chrome-dots">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <span class="chrome-title">results.feed</span>
+          </div>
+
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">Inspect</p>
+              <h2>Review Results</h2>
+            </div>
+            <div id="resultMeta" class="result-meta">Waiting for a review run.</div>
+          </div>
+
+          <div id="resultsSummary" class="results-summary"></div>
+
+          <div id="emptyState" class="empty-state">
+            Findings will appear here with severity badges, explanations, and the
+            exact snippets that were logged to Notion.
+          </div>
+          <div id="issueList" class="issue-list"></div>
+
+          <div class="log-wrapper">
+            <div class="panel-header panel-header-tight">
+              <div>
+                <p class="section-kicker">Trace</p>
+                <h3>Notion Activity</h3>
+              </div>
+            </div>
+            <div id="logPanel" class="log-panel"></div>
+          </div>
+        </section>
+      </main>
+
+      <section class="panel standards">
+        <div class="panel-chrome">
+          <div class="chrome-dots">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <span class="chrome-title">standards.registry</span>
+        </div>
+
+        <div class="panel-header">
+          <div>
+            <p class="section-kicker">Knowledge Base</p>
+            <h2>Team Standards</h2>
+            <p class="subcopy">
+              A living style guide generated from the issues your team actually encounters.
+            </p>
+          </div>
+          <button id="refreshStandardsBtn" class="ghost-button">Refresh</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Rule</th>
+                <th>Category</th>
+                <th>Times Flagged</th>
+                <th>Last Seen</th>
+                <th>Example</th>
+              </tr>
+            </thead>
+            <tbody id="standardsBody">
+              <tr>
+                <td colspan="5" class="table-empty">
+                  Run setup, then review code to populate team standards.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
