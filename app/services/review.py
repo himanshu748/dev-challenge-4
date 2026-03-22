@@ -11,7 +11,7 @@ from app.schemas.review import (
     WeeklyDigestResponse,
 )
 from app.services.notion import NotionService
-from app.services.reviewer import ClaudeReviewEngine
+from app.services.reviewer import HFReviewEngine
 from app.services.state import StateStore
 
 
@@ -23,7 +23,7 @@ class ReviewService:
     def __init__(
         self,
         *,
-        reviewer: ClaudeReviewEngine,
+        reviewer: HFReviewEngine,
         notion_service: NotionService,
         state_store: StateStore,
         notion_parent_page_id: str,
@@ -65,7 +65,7 @@ class ReviewService:
             issues=analysis.issues,
             notion_url=notion_result.notion_url,
             standards_updated=notion_result.standards_updated,
-            logs=[f"Claude found {len(analysis.issues)} issues.", *notion_result.activity],
+            logs=[f"AI found {len(analysis.issues)} issues.", *notion_result.activity],
         )
 
     async def review_file(self, request: ReviewFileRequest) -> ReviewResponse:
@@ -86,7 +86,7 @@ class ReviewService:
             issues=analysis.issues,
             notion_url=notion_result.notion_url,
             standards_updated=notion_result.standards_updated,
-            logs=[f"Claude found {len(analysis.issues)} issues.", *notion_result.activity],
+            logs=[f"AI found {len(analysis.issues)} issues.", *notion_result.activity],
         )
 
     async def get_standards(self) -> StandardsResponse:

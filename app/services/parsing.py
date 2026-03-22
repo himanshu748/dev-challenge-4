@@ -51,7 +51,7 @@ def extract_json_payload(raw_text: str):
                     except json.JSONDecodeError:
                         break
 
-    raise ValueError("Claude did not return valid JSON.")
+    raise ValueError("AI did not return valid JSON.")
 
 
 def compact_json(value, max_chars: int = 12000) -> str:

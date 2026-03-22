@@ -103,7 +103,7 @@ reviewBtn.addEventListener("click", async () => {
       : "Clean pass on the latest review",
     description: data.issues.length
       ? "Each finding is ready to inspect below and has been sent to the Notion review knowledge base."
-      : "Claude did not surface actionable issues in the latest run, so the knowledge base stays clean.",
+      : "AI did not surface actionable issues in the latest run, so the knowledge base stays clean.",
     items: [
       { label: "Notion target", value: data.notion_url, href: data.notion_url },
       { label: "Standards touched", value: String(data.standards_updated) },

@@ -1,6 +1,6 @@
 # PRReviewIQ
 
-PRReviewIQ is a local FastAPI app plus Python CLI that reviews pull request diffs with Claude and logs every review insight into a Notion knowledge base through Notion MCP.
+PRReviewIQ is a local FastAPI app plus Python CLI that reviews pull request diffs with HuggingFace and logs every review insight into a Notion knowledge base through Notion MCP.
 
 ## What it does
 
@@ -13,7 +13,7 @@ PRReviewIQ is a local FastAPI app plus Python CLI that reviews pull request diff
 
 ## Important Notion MCP note
 
-The prompt referenced Anthropic's remote MCP beta header `mcp-client-2025-04-04`, but that beta is deprecated as of March 10, 2026. This implementation uses the official `@notionhq/notion-mcp-server` package locally via `npx`, with `NOTION_TOKEN` passed to the MCP server, so all Notion writes still happen through MCP and never through direct REST calls from this app.
+This implementation uses the official `@notionhq/notion-mcp-server` package locally via `npx`, with `NOTION_TOKEN` passed to the MCP server, so all Notion writes still happen through MCP and never through direct REST calls from this app.
 
 ## Prerequisites
 
@@ -21,7 +21,7 @@ The prompt referenced Anthropic's remote MCP beta header `mcp-client-2025-04-04`
 - Node.js and `npx`
 - A Notion integration token in `NOTION_TOKEN`
 - A parent Notion page ID in `NOTION_PARENT_PAGE_ID`
-- An Anthropic API key in `ANTHROPIC_API_KEY`
+- A HuggingFace API key in `HF_API_KEY`
 
 ## Run locally
 

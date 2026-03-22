@@ -5,10 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    anthropic_api_key: str = Field(..., alias="ANTHROPIC_API_KEY")
-    anthropic_model: str = Field("claude-sonnet-4-20250514", alias="ANTHROPIC_MODEL")
-    anthropic_api_url: str = "https://api.anthropic.com/v1/messages"
-    anthropic_version: str = "2023-06-01"
+    hf_api_key: str = Field(..., alias="HF_API_KEY")
+    hf_model: str = Field("Qwen/Qwen2.5-72B-Instruct", alias="HF_MODEL")
     notion_token: str = Field(..., alias="NOTION_TOKEN")
     notion_parent_page_id: str = Field(..., alias="NOTION_PARENT_PAGE_ID")
     notion_mcp_command: str = "npx"

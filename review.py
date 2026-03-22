@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
+import urllib.request
+import urllib.error
 from pathlib import Path
-
-import httpx
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,17 +34,18 @@ def main() -> int:
             payload = build_file_payload(args.file, args.pr_title, args.repo_name)
             endpoint = "/api/review-file"
 
-        response = httpx.post(
-            f"{args.server_url.rstrip('/')}{endpoint}",
-            json=payload,
-            timeout=120.0,
+        url = f"{args.server_url.rstrip('/')}{endpoint}"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
-        response.raise_for_status()
-    except (subprocess.CalledProcessError, FileNotFoundError, httpx.HTTPError) as exc:
+        with urllib.request.urlopen(req, timeout=120) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (subprocess.CalledProcessError, FileNotFoundError, urllib.error.URLError) as exc:
         print(f"PRReviewIQ failed: {exc}", file=sys.stderr)
         return 1
-
-    data = response.json()
     issues = data.get("issues", [])
     print(f"PRReviewIQ found {len(issues)} issue(s).")
     for issue in issues:

@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 
 from app.schemas.review import CodeReviewAnalysis
-from app.services.anthropic import AnthropicService
+from app.services.hf import HFService
 from app.services.parsing import extract_json_payload
 
 
-class ClaudeReviewEngine:
-    def __init__(self, anthropic: AnthropicService) -> None:
-        self.anthropic = anthropic
+class HFReviewEngine:
+    def __init__(self, hf: HFService) -> None:
+        self.hf = hf
 
     async def review_diff(self, *, diff: str, pr_title: str, repo: str) -> CodeReviewAnalysis:
         prompt = {
@@ -74,7 +74,7 @@ Rules:
 - Never wrap the JSON in markdown fences.
 """.strip()
 
-        response_text = await self.anthropic.chat(
+        response_text = await self.hf.chat(
             system_prompt=system_prompt,
             messages=[
                 {

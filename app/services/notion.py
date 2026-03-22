@@ -4,6 +4,7 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from app.core.config import Settings
 from app.schemas.review import (
     CodeReviewAnalysis,
     KnowledgeBaseState,
@@ -11,68 +12,168 @@ from app.schemas.review import (
     StandardRecord,
     WeeklyDigestResult,
 )
-from app.services.anthropic import AnthropicService
-from app.services.mcp_client import MCPClientError, NotionMCPClient
-from app.services.parsing import compact_json, extract_json_payload
+from app.services.hf import HFService
+from app.services.mcp_client import (
+    MCPClientError,
+    _bullet,
+    _heading,
+    _para,
+    _rt,
+    extract_date,
+    extract_id_from_url,
+    extract_number,
+    extract_rich_text,
+    extract_select,
+    extract_checkbox,
+    extract_title,
+    find_by_title,
+    mcp_create_database,
+    mcp_create_db_page,
+    mcp_create_page,
+    mcp_patch_page,
+    mcp_query_database,
+    mcp_search,
+    notion_session,
+)
+from app.services.parsing import extract_json_payload
 
 
 class NotionAutomationError(RuntimeError):
     pass
 
 
+DIGEST_SYSTEM_PROMPT = """
+You are PRReviewIQ's digest generator.
+Given a list of code review issues from the past week, generate a weekly digest in JSON:
+{
+  "summary": "1-2 sentence overview",
+  "overview": "paragraph summarizing the week's code quality",
+  "categories": {"Security": 2, "Performance": 1},
+  "severities": {"Critical": 1, "Major": 3},
+  "top_issues": ["most common issue 1", "most common issue 2"],
+  "most_flagged_files": ["file1.py", "file2.js"],
+  "trends": "paragraph about improvement or regression trends",
+  "recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"]
+}
+If there are no issues, still provide a positive summary and recommendations.
+Never wrap the JSON in markdown fences.
+""".strip()
+
+
 class NotionService:
-    def __init__(self, mcp_client: NotionMCPClient, anthropic: AnthropicService) -> None:
-        self.mcp_client = mcp_client
-        self.anthropic = anthropic
+    def __init__(self, settings: Settings, hf: HFService) -> None:
+        self.settings = settings
+        self.hf = hf
 
     async def close(self) -> None:
-        await self.mcp_client.close()
+        pass  # no persistent connection; sessions are opened per-operation
 
-    async def setup_workspace(self, parent_page_id: str) -> tuple[KnowledgeBaseState, list[str]]:
-        today = date.today().isoformat()
-        task = f"""
-Set up a Notion knowledge base for PRReviewIQ under parent page ID `{parent_page_id}`.
-Today's date is {today}.
+    # ─── setup_workspace ─────────────────────────────────────────────────
 
-Create or reuse these exact resources:
-1. A database titled "🔍 Review Insights" with properties:
-   - Title: title
-   - Severity: select with options Critical, Major, Minor, Suggestion
-   - Category: select with options Security, Performance, Readability, Architecture, Testing, Bug
-   - File: rich_text
-   - PR Title: rich_text
-   - Repo: rich_text
-   - Code Snippet: rich_text
-   - Explanation: rich_text
-   - Date: date
-2. A database titled "📚 Coding Standards" with properties:
-   - Rule: title
-   - Category: select with options Security, Performance, Readability, Architecture, Testing, Bug
-   - Example: rich_text
-   - Auto-generated: checkbox
-   - Times Flagged: number
-   - Last Seen: date
-3. A page titled "📊 Team Stats".
+    async def setup_workspace(
+        self, parent_page_id: str
+    ) -> tuple[KnowledgeBaseState, list[str]]:
+        logs: list[str] = []
 
-Avoid duplicates. Reuse exact-title matches if they already exist.
+        async with notion_session(self.settings) as session:
+            existing = await mcp_search(session, "")
 
-Return a final JSON result with this exact shape:
-{{
-  "review_insights_url": "https://...",
-  "coding_standards_url": "https://...",
-  "team_stats_url": "https://...",
-  "activity": ["summary of what you created or reused"]
-}}
-""".strip()
-        result, logs = await self._run_tool_loop(task, max_steps=20)
+            # ── Review Insights database ─────────────────────────────────
+            review_db = find_by_title(existing, "🔍 Review Insights")
+            if review_db is None:
+                review_db = await mcp_create_database(
+                    session,
+                    parent_page_id,
+                    "🔍 Review Insights",
+                    {
+                        "Title": {"title": {}},
+                        "Severity": {
+                            "select": {
+                                "options": [
+                                    {"name": "Critical"},
+                                    {"name": "Major"},
+                                    {"name": "Minor"},
+                                    {"name": "Suggestion"},
+                                ]
+                            }
+                        },
+                        "Category": {
+                            "select": {
+                                "options": [
+                                    {"name": "Security"},
+                                    {"name": "Performance"},
+                                    {"name": "Readability"},
+                                    {"name": "Architecture"},
+                                    {"name": "Testing"},
+                                    {"name": "Bug"},
+                                ]
+                            }
+                        },
+                        "File": {"rich_text": {}},
+                        "PR Title": {"rich_text": {}},
+                        "Repo": {"rich_text": {}},
+                        "Code Snippet": {"rich_text": {}},
+                        "Explanation": {"rich_text": {}},
+                        "Date": {"date": {}},
+                    },
+                )
+                logs.append("Created 🔍 Review Insights database")
+            else:
+                logs.append("Reused existing 🔍 Review Insights database")
+
+            # ── Coding Standards database ────────────────────────────────
+            standards_db = find_by_title(existing, "📚 Coding Standards")
+            if standards_db is None:
+                standards_db = await mcp_create_database(
+                    session,
+                    parent_page_id,
+                    "📚 Coding Standards",
+                    {
+                        "Rule": {"title": {}},
+                        "Category": {
+                            "select": {
+                                "options": [
+                                    {"name": "Security"},
+                                    {"name": "Performance"},
+                                    {"name": "Readability"},
+                                    {"name": "Architecture"},
+                                    {"name": "Testing"},
+                                    {"name": "Bug"},
+                                ]
+                            }
+                        },
+                        "Example": {"rich_text": {}},
+                        "Auto-generated": {"checkbox": {}},
+                        "Times Flagged": {"number": {}},
+                        "Last Seen": {"date": {}},
+                    },
+                )
+                logs.append("Created 📚 Coding Standards database")
+            else:
+                logs.append("Reused existing 📚 Coding Standards database")
+
+            # ── Team Stats page ──────────────────────────────────────────
+            team_stats = find_by_title(existing, "📊 Team Stats")
+            if team_stats is None:
+                team_stats = await mcp_create_page(
+                    session,
+                    parent_page_id,
+                    "📊 Team Stats",
+                    [_para("Team code quality statistics and weekly digests.")],
+                )
+                logs.append("Created 📊 Team Stats page")
+            else:
+                logs.append("Reused existing 📊 Team Stats page")
+
         state = KnowledgeBaseState(
-            review_insights_url=result["review_insights_url"],
-            coding_standards_url=result["coding_standards_url"],
-            team_stats_url=result["team_stats_url"],
+            review_insights_url=review_db.get("url", ""),
+            coding_standards_url=standards_db.get("url", ""),
+            team_stats_url=team_stats.get("url", ""),
             parent_page_id=parent_page_id,
         )
-        activity = result.get("activity", [])
-        return state, [*logs, *activity]
+        return state, logs
+
+    # ─── persist_review ──────────────────────────────────────────────────
 
     async def persist_review(
         self,
@@ -83,239 +184,228 @@ Return a final JSON result with this exact shape:
         state: KnowledgeBaseState,
     ) -> NotionWriteResult:
         today = date.today().isoformat()
-        task = f"""
-Use Notion MCP to write this PR review into the existing knowledge base.
-Today's date is {today}.
-Review Insights database URL: {state.review_insights_url}
-Coding Standards database URL: {state.coding_standards_url}
-PR title: {pr_title}
-Repo: {repo}
+        logs: list[str] = []
+        standards_updated = 0
 
-Analysis JSON:
-{analysis.model_dump_json(indent=2)}
+        review_db_id = extract_id_from_url(state.review_insights_url)
+        standards_db_id = extract_id_from_url(state.coding_standards_url)
 
-Required actions:
-- Create one Review Insights entry for each issue.
-- Set the Title property to the issue message.
-- Map Severity, Category, File, PR Title, Repo, Code Snippet, Explanation, and Date exactly.
-- For each unique standard rule in the analysis, upsert it by exact Rule match in Coding Standards.
-- If a rule already exists, increment Times Flagged by 1 and refresh Category, Example, Auto-generated, and Last Seen.
-- If a rule does not exist, create it with Auto-generated=true, Times Flagged=1, and Last Seen=today.
-- If there are no issues or no standards, do not create unnecessary pages.
+        async with notion_session(self.settings) as session:
+            # ── Create Review Insights entries ────────────────────────────
+            for issue in analysis.issues:
+                await mcp_create_db_page(
+                    session,
+                    review_db_id,
+                    {
+                        "Title": {"title": _rt(issue.message)},
+                        "Severity": {"select": {"name": issue.severity}},
+                        "Category": {"select": {"name": issue.category}},
+                        "File": {"rich_text": _rt(issue.file)},
+                        "PR Title": {"rich_text": _rt(pr_title)},
+                        "Repo": {"rich_text": _rt(repo)},
+                        "Code Snippet": {"rich_text": _rt(issue.code_snippet)},
+                        "Explanation": {"rich_text": _rt(issue.explanation)},
+                        "Date": {"date": {"start": today}},
+                    },
+                )
+                logs.append(f"Created review insight: {issue.message}")
 
-Return a final JSON result with this exact shape:
-{{
-  "notion_url": "{state.review_insights_url}",
-  "standards_updated": 0,
-  "activity": ["what was created or updated"]
-}}
-""".strip()
-        result, logs = await self._run_tool_loop(task, max_steps=30)
-        return NotionWriteResult.model_validate(
-            {
-                "notion_url": result.get("notion_url", state.review_insights_url),
-                "standards_updated": result.get("standards_updated", 0),
-                "activity": [*logs, *result.get("activity", [])],
-            }
+            # ── Upsert Coding Standards ──────────────────────────────────
+            for standard in analysis.standards:
+                existing_pages = await mcp_query_database(
+                    session,
+                    standards_db_id,
+                    filter_obj={
+                        "property": "Rule",
+                        "title": {"equals": standard.rule},
+                    },
+                )
+
+                if existing_pages:
+                    page = existing_pages[0]
+                    page_id = page["id"]
+                    current_count = extract_number(
+                        page.get("properties", {}).get("Times Flagged", {})
+                    )
+                    await mcp_patch_page(
+                        session,
+                        page_id,
+                        {
+                            "Category": {"select": {"name": standard.category}},
+                            "Example": {"rich_text": _rt(standard.example)},
+                            "Auto-generated": {"checkbox": True},
+                            "Times Flagged": {"number": current_count + 1},
+                            "Last Seen": {"date": {"start": today}},
+                        },
+                    )
+                    logs.append(f"Updated standard: {standard.rule}")
+                else:
+                    await mcp_create_db_page(
+                        session,
+                        standards_db_id,
+                        {
+                            "Rule": {"title": _rt(standard.rule)},
+                            "Category": {"select": {"name": standard.category}},
+                            "Example": {"rich_text": _rt(standard.example)},
+                            "Auto-generated": {"checkbox": True},
+                            "Times Flagged": {"number": 1},
+                            "Last Seen": {"date": {"start": today}},
+                        },
+                    )
+                    logs.append(f"Created standard: {standard.rule}")
+                standards_updated += 1
+
+        return NotionWriteResult(
+            notion_url=state.review_insights_url,
+            standards_updated=standards_updated,
+            activity=logs,
         )
 
-    async def fetch_standards(self, state: KnowledgeBaseState) -> tuple[list[StandardRecord], list[str]]:
-        task = f"""
-Read every entry from the Coding Standards database at this URL:
-{state.coding_standards_url}
+    # ─── fetch_standards ─────────────────────────────────────────────────
 
-Return a final JSON result with this exact shape:
-{{
-  "rules": [
-    {{
-      "rule": "Rule text",
-      "category": "Security|Performance|Readability|Architecture|Testing|Bug",
-      "example": "Example text",
-      "auto_generated": true,
-      "times_flagged": 3,
-      "last_seen": "YYYY-MM-DD or null",
-      "url": "https://..."
-    }}
-  ],
-  "activity": ["how you fetched the data"]
-}}
-Sort the rules by Times Flagged descending before returning them.
-""".strip()
-        result, logs = await self._run_tool_loop(task, max_steps=18)
-        rules = [StandardRecord.model_validate(item) for item in result.get("rules", [])]
-        return rules, [*logs, *result.get("activity", [])]
+    async def fetch_standards(
+        self, state: KnowledgeBaseState
+    ) -> tuple[list[StandardRecord], list[str]]:
+        standards_db_id = extract_id_from_url(state.coding_standards_url)
+        logs: list[str] = []
 
-    async def create_weekly_digest(self, state: KnowledgeBaseState) -> WeeklyDigestResult:
+        async with notion_session(self.settings) as session:
+            pages = await mcp_query_database(
+                session,
+                standards_db_id,
+                sorts=[{"property": "Times Flagged", "direction": "descending"}],
+            )
+            logs.append(f"Fetched {len(pages)} coding standards")
+
+        rules: list[StandardRecord] = []
+        for page in pages:
+            props = page.get("properties", {})
+            rule = extract_title(props.get("Rule", {}))
+            if not rule:
+                continue
+            category = extract_select(props.get("Category", {}))
+            rules.append(
+                StandardRecord(
+                    rule=rule,
+                    category=category or "Readability",
+                    example=extract_rich_text(props.get("Example", {})),
+                    auto_generated=extract_checkbox(props.get("Auto-generated", {})),
+                    times_flagged=extract_number(props.get("Times Flagged", {})),
+                    last_seen=extract_date(props.get("Last Seen", {})),
+                    url=page.get("url"),
+                )
+            )
+
+        return rules, logs
+
+    # ─── create_weekly_digest ────────────────────────────────────────────
+
+    async def create_weekly_digest(
+        self, state: KnowledgeBaseState
+    ) -> WeeklyDigestResult:
         today = datetime.now(tz=UTC).date()
         current_week_start = today - timedelta(days=today.weekday())
         seven_days_ago = today - timedelta(days=7)
-        fourteen_days_ago = today - timedelta(days=14)
-        task = f"""
-Create a weekly code quality digest using the existing Notion knowledge base.
-Review Insights database URL: {state.review_insights_url}
-Team Stats parent page URL: {state.team_stats_url}
-Current date: {today.isoformat()}
 
-You should:
-- Read Review Insights entries from the last 7 days, starting {seven_days_ago.isoformat()}.
-- If possible, compare against the previous 7-day period starting {fourteen_days_ago.isoformat()} to describe improvement trends.
-- Group findings by category and severity.
-- Identify the top recurring issues and most flagged files.
-- Create a page under Team Stats titled "📊 Week of {current_week_start.isoformat()} Code Quality Report".
-- Write sections for Overview, Category Breakdown, Severity Breakdown, Top Recurring Issues, Most Flagged Files, Improvement Trends, and 3 Specific Recommendations.
+        review_db_id = extract_id_from_url(state.review_insights_url)
+        team_stats_id = extract_id_from_url(state.team_stats_url)
+        logs: list[str] = []
 
-Return a final JSON result with this exact shape:
-{{
-  "report_title": "📊 Week of {current_week_start.isoformat()} Code Quality Report",
-  "notion_url": "https://...",
-  "summary": "1-2 sentence summary",
-  "activity": ["what data you used and what page you created"]
-}}
-""".strip()
-        result, logs = await self._run_tool_loop(task, max_steps=24)
-        return WeeklyDigestResult.model_validate(
-            {
-                "report_title": result["report_title"],
-                "notion_url": result["notion_url"],
-                "summary": result["summary"],
-                "activity": [*logs, *result.get("activity", [])],
-            }
-        )
+        async with notion_session(self.settings) as session:
+            # ── Read recent review insights ──────────────────────────────
+            recent_pages = await mcp_query_database(
+                session,
+                review_db_id,
+                filter_obj={
+                    "property": "Date",
+                    "date": {"on_or_after": seven_days_ago.isoformat()},
+                },
+            )
+            logs.append(f"Read {len(recent_pages)} review insights from last 7 days")
 
-    async def _run_tool_loop(self, task: str, *, max_steps: int) -> tuple[dict[str, Any], list[str]]:
-        tool_catalog = await self.mcp_client.list_tools()
-        rendered_tools = [
-            {
-                "name": tool.get("name"),
-                "description": tool.get("description", ""),
-                "input_schema": tool.get("inputSchema", {}),
-            }
-            for tool in tool_catalog
-        ]
+            # ── Summarise for HF ─────────────────────────────────────────
+            issues_summary: list[dict[str, str]] = []
+            for page in recent_pages:
+                props = page.get("properties", {})
+                issues_summary.append(
+                    {
+                        "message": extract_title(props.get("Title", {})),
+                        "severity": extract_select(props.get("Severity", {})),
+                        "category": extract_select(props.get("Category", {})),
+                        "file": extract_rich_text(props.get("File", {})),
+                    }
+                )
 
-        system_prompt = """
-You are PRReviewIQ's Notion operator.
-You have access to real Notion MCP tools, described in TOOL_CATALOG.
-
-You must respond with exactly one JSON object and nothing else.
-
-When you want to call a tool, respond with:
-{
-  "type": "tool_call",
-  "name": "exact tool name from TOOL_CATALOG",
-  "arguments": {},
-  "comment": "short reason for this step"
-}
-
-When the task is complete, respond with:
-{
-  "type": "final",
-  "result": { ...final JSON requested by the task... }
-}
-
-Rules:
-- Use one tool call at a time.
-- Use tool names exactly as listed.
-- Arguments must follow the tool input schema.
-- Prefer exact title matches and avoid duplicate resources.
-- If a tool errors, revise the next call instead of repeating the same invalid request.
-- Never return markdown fences.
-""".strip()
-
-        messages = [
-            {
-                "role": "user",
-                "content": (
-                    "TOOL_CATALOG:\n"
-                    f"{json.dumps(rendered_tools, ensure_ascii=False, indent=2)}\n\n"
-                    "TASK:\n"
-                    f"{task}"
-                ),
-            }
-        ]
-        activity_log: list[str] = []
-
-        for _ in range(max_steps):
-            response_text = await self.anthropic.chat(
-                system_prompt=system_prompt,
-                messages=messages,
+            # ── Generate digest via HF ───────────────────────────────────
+            digest_text = await self.hf.chat(
+                system_prompt=DIGEST_SYSTEM_PROMPT,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "week_start": current_week_start.isoformat(),
+                                "issues": issues_summary,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
+                ],
                 max_tokens=4096,
             )
-            payload = extract_json_payload(response_text)
-            action_type = payload.get("type")
+            digest = extract_json_payload(digest_text)
 
-            if action_type == "final":
-                result = payload.get("result")
-                if not isinstance(result, dict):
-                    raise NotionAutomationError("Final result from Claude was not an object.")
-                return result, activity_log
-
-            if action_type != "tool_call":
-                raise NotionAutomationError("Claude returned an invalid tool action payload.")
-
-            tool_name = payload.get("name")
-            tool_args = payload.get("arguments", {})
-            if not isinstance(tool_args, dict):
-                raise NotionAutomationError("Tool arguments must be a JSON object.")
-
-            comment = payload.get("comment")
-            if comment:
-                activity_log.append(f"Claude: {comment}")
-
-            try:
-                tool_result = await self.mcp_client.call_tool(tool_name, tool_args)
-                activity_log.append(self._render_tool_log(tool_name, tool_result))
-                tool_feedback = {
-                    "ok": True,
-                    "tool_name": tool_name,
-                    "tool_result": tool_result,
-                }
-            except MCPClientError as exc:
-                tool_feedback = {
-                    "ok": False,
-                    "tool_name": tool_name,
-                    "error": str(exc),
-                }
-                activity_log.append(f"{tool_name}: {exc}")
-
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": json.dumps(payload, ensure_ascii=False),
-                }
+            # ── Build Notion blocks ──────────────────────────────────────
+            report_title = (
+                f"📊 Week of {current_week_start.isoformat()} Code Quality Report"
             )
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "TOOL_RESULT:\n"
-                        f"{compact_json(tool_feedback)}\n\n"
-                        "Continue with the next tool call or return the final result."
-                    ),
-                }
+            blocks = _build_digest_blocks(digest)
+
+            # ── Write page under Team Stats ──────────────────────────────
+            page = await mcp_create_page(
+                session, team_stats_id, report_title, blocks
             )
+            logs.append(f"Created digest page: {report_title}")
 
-        raise NotionAutomationError("Claude did not finish the Notion task within the tool loop limit.")
-
-    @staticmethod
-    def _render_tool_log(tool_name: str, tool_result: dict[str, Any]) -> str:
-        url = _find_first_url(tool_result)
-        if url:
-            return f"{tool_name}: {url}"
-        return f"{tool_name}: completed"
+        return WeeklyDigestResult(
+            report_title=report_title,
+            notion_url=page.get("url", ""),
+            summary=digest.get("summary", ""),
+            activity=logs,
+        )
 
 
-def _find_first_url(value: Any) -> str | None:
-    if isinstance(value, dict):
-        for key, nested in value.items():
-            if key == "url" and isinstance(nested, str):
-                return nested
-            found = _find_first_url(nested)
-            if found:
-                return found
-    elif isinstance(value, list):
-        for item in value:
-            found = _find_first_url(item)
-            if found:
-                return found
-    return None
+# ─── Private helpers ─────────────────────────────────────────────────────────
+
+
+def _build_digest_blocks(digest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build Notion page blocks from a digest JSON payload."""
+    blocks: list[dict[str, Any]] = []
+
+    blocks.append(_heading("Overview"))
+    blocks.append(_para(digest.get("overview", "No data available.")))
+
+    blocks.append(_heading("Category Breakdown"))
+    for cat, count in digest.get("categories", {}).items():
+        blocks.append(_bullet(f"{cat}: {count} issues"))
+
+    blocks.append(_heading("Severity Breakdown"))
+    for sev, count in digest.get("severities", {}).items():
+        blocks.append(_bullet(f"{sev}: {count} issues"))
+
+    blocks.append(_heading("Top Recurring Issues"))
+    for issue in digest.get("top_issues", []):
+        blocks.append(_bullet(issue))
+
+    blocks.append(_heading("Most Flagged Files"))
+    for f in digest.get("most_flagged_files", []):
+        blocks.append(_bullet(f))
+
+    blocks.append(_heading("Improvement Trends"))
+    blocks.append(_para(digest.get("trends", "No trends data.")))
+
+    blocks.append(_heading("Recommendations"))
+    for rec in digest.get("recommendations", []):
+        blocks.append(_bullet(rec))
+
+    return blocks
