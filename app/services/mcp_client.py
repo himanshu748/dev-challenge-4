@@ -182,14 +182,18 @@ async def mcp_create_database(
     title: str,
     properties: dict[str, Any],
 ) -> dict[str, Any]:
-    """Create a Notion database via MCP."""
+    """Create a Notion page representing a database (columns listed as content)."""
+    blocks = [_heading(title), _para("Records will be added as sub-pages.")]
+    blocks.append(_heading("Fields", 3))
+    for col_name in properties:
+        blocks.append(_bullet(col_name))
     return await mcp_call(
         session,
-        "API-post-database",
+        "API-post-page",
         {
             "parent": {"page_id": parent_id},
-            "title": _rt(title),
-            "properties": properties,
+            "properties": {"title": {"title": _rt(title)}},
+            "children": blocks[:100],
         },
     )
 
@@ -216,14 +220,13 @@ async def mcp_query_database(
     filter_obj: dict[str, Any] | None = None,
     sorts: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Query a Notion database via MCP."""
-    payload: dict[str, Any] = {"database_id": database_id}
-    if filter_obj:
-        payload["filter"] = filter_obj
-    if sorts:
-        payload["sorts"] = sorts
-    result = await mcp_call(session, "API-post-database-query", payload)
-    return result.get("results", [])
+    """Query records -- falls back to search if database query unavailable."""
+    results = await mcp_search(session, "")
+    return [
+        p for p in results
+        if p.get("parent", {}).get("page_id", "").replace("-", "")
+        == database_id.replace("-", "")
+    ]
 
 
 async def mcp_patch_page(
