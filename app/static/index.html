@@ -37,6 +37,7 @@
           <div class="hero-band">
             <span class="hero-chip">HuggingFace review engine</span>
             <span class="hero-chip">Notion MCP logging</span>
+            <span class="hero-chip">GitHub MCP integration</span>
             <span class="hero-chip">Local FastAPI workflow</span>
           </div>
         </div>
@@ -100,12 +101,20 @@
               </p>
             </div>
             <div class="mode-switch">
+              <button class="mode-button" data-mode="github">GitHub PR</button>
               <button class="mode-button active" data-mode="diff">PR Diff</button>
               <button class="mode-button" data-mode="file">Single File</button>
             </div>
           </div>
 
-          <div class="field-grid">
+          <div id="githubFields" class="field-grid hidden">
+            <label class="field" style="grid-column:1/-1">
+              <span>GitHub PR URL</span>
+              <input id="prUrl" type="url" placeholder="https://github.com/owner/repo/pull/123" />
+            </label>
+          </div>
+
+          <div id="manualFields" class="field-grid">
             <label class="field">
               <span>PR Title</span>
               <input id="prTitle" type="text" placeholder="Fix flaky login tests" />
@@ -120,7 +129,7 @@
             </label>
           </div>
 
-          <label class="field textarea-field">
+          <label class="field textarea-field" id="sourceField">
             <span id="sourceLabel">Raw git diff</span>
             <textarea
               id="sourceInput"

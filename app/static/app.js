@@ -1,8 +1,12 @@
 const themeButtons = [...document.querySelectorAll(".theme-button")];
 const modeButtons = [...document.querySelectorAll(".mode-button")];
 const filenameField = document.getElementById("filenameField");
+const githubFields = document.getElementById("githubFields");
+const manualFields = document.getElementById("manualFields");
+const sourceField = document.getElementById("sourceField");
 const sourceInput = document.getElementById("sourceInput");
 const sourceLabel = document.getElementById("sourceLabel");
+const prUrl = document.getElementById("prUrl");
 const resultMeta = document.getElementById("resultMeta");
 const emptyState = document.getElementById("emptyState");
 const issueList = document.getElementById("issueList");
@@ -55,38 +59,52 @@ setupBtn.addEventListener("click", async () => {
 });
 
 reviewBtn.addEventListener("click", async () => {
-  const prTitle = document.getElementById("prTitle").value.trim();
-  const repoName = document.getElementById("repoName").value.trim();
-  const source = sourceInput.value.trim();
+  let endpoint, payload;
 
-  if (!prTitle || !repoName || !source) {
-    renderLogs(["PR title, repo, and input content are required."]);
-    setStatus("Waiting for required fields");
-    return;
+  if (currentMode === "github") {
+    const url = prUrl.value.trim();
+    if (!url) {
+      renderLogs(["GitHub PR URL is required."]);
+      setStatus("Waiting for PR URL");
+      return;
+    }
+    if (!/^https?:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(url)) {
+      renderLogs(["Invalid PR URL. Expected: https://github.com/owner/repo/pull/123"]);
+      setStatus("Invalid PR URL");
+      return;
+    }
+    endpoint = "/api/review-github-pr";
+    payload = { pr_url: url };
+    setStatus("Fetching PR from GitHub");
+  } else {
+    const prTitle = document.getElementById("prTitle").value.trim();
+    const repoName = document.getElementById("repoName").value.trim();
+    const source = sourceInput.value.trim();
+
+    if (!prTitle || !repoName || !source) {
+      renderLogs(["PR title, repo, and input content are required."]);
+      setStatus("Waiting for required fields");
+      return;
+    }
+
+    endpoint = currentMode === "diff" ? "/api/review-pr" : "/api/review-file";
+    payload =
+      currentMode === "diff"
+        ? { diff: source, pr_title: prTitle, repo: repoName }
+        : {
+            filename: document.getElementById("filename").value.trim(),
+            content: source,
+            pr_title: prTitle,
+            repo: repoName,
+          };
+
+    if (currentMode === "file" && !payload.filename) {
+      renderLogs(["Filename is required for single-file reviews."]);
+      setStatus("Filename required");
+      return;
+    }
+    setStatus(currentMode === "diff" ? "Reviewing diff" : "Reviewing file");
   }
-
-  const endpoint = currentMode === "diff" ? "/api/review-pr" : "/api/review-file";
-  const payload =
-    currentMode === "diff"
-      ? {
-          diff: source,
-          pr_title: prTitle,
-          repo: repoName,
-        }
-      : {
-          filename: document.getElementById("filename").value.trim(),
-          content: source,
-          pr_title: prTitle,
-          repo: repoName,
-        };
-
-  if (currentMode === "file" && !payload.filename) {
-    renderLogs(["Filename is required for single-file reviews."]);
-    setStatus("Filename required");
-    return;
-  }
-
-  setStatus(currentMode === "diff" ? "Reviewing diff" : "Reviewing file");
 
   const data = await api(endpoint, {
     method: "POST",
@@ -162,16 +180,28 @@ function setTheme(theme) {
 
 function setMode(mode) {
   currentMode = mode;
-  statMode.textContent = mode === "file" ? "Single File" : "PR Diff";
+  const labels = { github: "GitHub PR", diff: "PR Diff", file: "Single File" };
+  statMode.textContent = labels[mode] || mode;
   modeButtons.forEach((button) =>
     button.classList.toggle("active", button.dataset.mode === mode),
   );
-  const fileMode = mode === "file";
-  filenameField.classList.toggle("hidden", !fileMode);
-  sourceLabel.textContent = fileMode ? "File content" : "Raw git diff";
-  sourceInput.placeholder = fileMode
-    ? "Paste the full file content here"
-    : "Paste the output of git diff main...HEAD here";
+
+  const isGithub = mode === "github";
+  const isFile = mode === "file";
+
+  githubFields.classList.toggle("hidden", !isGithub);
+  manualFields.classList.toggle("hidden", isGithub);
+  sourceField.classList.toggle("hidden", isGithub);
+  filenameField.classList.toggle("hidden", !isFile);
+
+  if (!isGithub) {
+    sourceLabel.textContent = isFile ? "File content" : "Raw git diff";
+    sourceInput.placeholder = isFile
+      ? "Paste the full file content here"
+      : "Paste the output of git diff main...HEAD here";
+  }
+
+  reviewBtn.textContent = isGithub ? "Review PR" : "Run Review";
 }
 
 function setStatus(text) {

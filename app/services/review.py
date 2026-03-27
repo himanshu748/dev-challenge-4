@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from app.core.config import Settings
 from app.schemas.review import (
     KnowledgeBaseState,
@@ -100,21 +102,23 @@ class ReviewService:
             raise RuntimeError("GITHUB_TOKEN not configured. Set it in .env to use GitHub MCP.")
         state = self._require_state()
 
+        # Parse PR URL: https://github.com/{owner}/{repo}/pull/{number}
+        m = re.match(r"https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)", request.pr_url.strip())
+        if not m:
+            raise ValueError(f"Invalid GitHub PR URL. Expected: https://github.com/owner/repo/pull/123")
+        owner, repo, pull_number = m.group(1), m.group(2), int(m.group(3))
+
         # Fetch PR info and files via GitHub MCP
         async with github_session(self.settings) as gh:
             pr_info = await mcp_call(gh, "get_pull_request", {
-                "owner": request.owner,
-                "repo": request.repo,
-                "pull_number": request.pull_number,
+                "owner": owner, "repo": repo, "pull_number": pull_number,
             })
             pr_files = await mcp_call(gh, "get_pull_request_files", {
-                "owner": request.owner,
-                "repo": request.repo,
-                "pull_number": request.pull_number,
+                "owner": owner, "repo": repo, "pull_number": pull_number,
             })
 
-        pr_title = pr_info.get("title", f"PR #{request.pull_number}")
-        repo_full = f"{request.owner}/{request.repo}"
+        pr_title = pr_info.get("title", f"PR #{pull_number}")
+        repo_full = f"{owner}/{repo}"
 
         # Build a combined diff from file patches
         diff_parts = []
