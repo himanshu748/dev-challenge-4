@@ -143,7 +143,7 @@ class ReviewService:
             notion_url=notion_result.notion_url,
             standards_updated=notion_result.standards_updated,
             logs=[
-                f"Fetched PR #{request.pull_number} from {repo_full} via GitHub MCP.",
+                f"Fetched PR #{pull_number} from {repo_full} via GitHub MCP.",
                 f"PR: {pr_title} ({len(diff_parts)} files changed).",
                 f"AI found {len(analysis.issues)} issues.",
                 *notion_result.activity,
