@@ -99,6 +99,24 @@ def notion_session(settings: Settings):
     return notion_mcp(settings)
 
 
+@asynccontextmanager
+async def github_mcp(settings: Settings):
+    """Spin up GitHub MCP stdio server and yield a ClientSession."""
+    params = StdioServerParameters(
+        command=settings.notion_mcp_command,
+        args=["-y", settings.github_mcp_package],
+        env={**os.environ, "GITHUB_PERSONAL_ACCESS_TOKEN": settings.github_token},
+    )
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            yield session
+
+
+def github_session(settings: Settings):
+    return github_mcp(settings)
+
+
 # ─── MCP call helper ─────────────────────────────────────────────────────────
 
 
@@ -181,21 +199,29 @@ async def mcp_create_database(
     parent_id: str,
     title: str,
     properties: dict[str, Any],
+    *,
+    token: str = "",
 ) -> dict[str, Any]:
-    """Create a Notion page representing a database (columns listed as content)."""
-    blocks = [_heading(title), _para("Records will be added as sub-pages.")]
-    blocks.append(_heading("Fields", 3))
-    for col_name in properties:
-        blocks.append(_bullet(col_name))
-    return await mcp_call(
-        session,
-        "API-post-page",
-        {
-            "parent": {"page_id": parent_id},
-            "properties": {"title": {"title": _rt(title)}},
-            "children": blocks[:100],
-        },
-    )
+    """Create a real Notion database via REST (MCP API-create-a-data-source
+    is broken on API v2025-09-03). Requires a token."""
+    if not token and isinstance(session, NotionHTTPFallback):
+        token = session._token
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Notion-Version": NOTION_VER,
+        "Content-Type": "application/json",
+    }
+    body = {
+        "parent": {"page_id": parent_id},
+        "title": _rt(title),
+        "properties": properties,
+    }
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(f"{NOTION_API}/databases", headers=headers, json=body)
+        result = r.json()
+    if r.status_code >= 400:
+        raise MCPClientError(f"Notion database creation failed: {result.get('message', str(result)[:200])}")
+    return result
 
 
 async def mcp_search(session: Any, query: str = "") -> list[dict[str, Any]]:
@@ -219,14 +245,30 @@ async def mcp_query_database(
     database_id: str,
     filter_obj: dict[str, Any] | None = None,
     sorts: list[dict[str, Any]] | None = None,
+    *,
+    token: str = "",
 ) -> list[dict[str, Any]]:
-    """Query records -- falls back to search if database query unavailable."""
-    results = await mcp_search(session, "")
-    return [
-        p for p in results
-        if p.get("parent", {}).get("page_id", "").replace("-", "")
-        == database_id.replace("-", "")
-    ]
+    """Query a Notion database. Uses REST because MCP API-query-data-source
+    returns 404 on the current Notion MCP server version."""
+    if not token and isinstance(session, NotionHTTPFallback):
+        token = session._token
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Notion-Version": NOTION_VER,
+        "Content-Type": "application/json",
+    }
+    body: dict[str, Any] = {}
+    if filter_obj:
+        body["filter"] = filter_obj
+    if sorts:
+        body["sorts"] = sorts
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(
+            f"{NOTION_API}/databases/{database_id}/query",
+            headers=headers, json=body,
+        )
+        result = r.json()
+    return result.get("results", [])
 
 
 async def mcp_patch_page(

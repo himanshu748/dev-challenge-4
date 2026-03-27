@@ -85,7 +85,8 @@ class NotionService:
                     session,
                     parent_page_id,
                     "🔍 Review Insights",
-                    {
+                    token=self.settings.notion_token,
+                    properties={
                         "Title": {"title": {}},
                         "Severity": {
                             "select": {
@@ -128,7 +129,8 @@ class NotionService:
                     session,
                     parent_page_id,
                     "📚 Coding Standards",
-                    {
+                    token=self.settings.notion_token,
+                    properties={
                         "Rule": {"title": {}},
                         "Category": {
                             "select": {
@@ -219,6 +221,7 @@ class NotionService:
                         "property": "Rule",
                         "title": {"equals": standard.rule},
                     },
+                    token=self.settings.notion_token,
                 )
 
                 if existing_pages:
@@ -274,6 +277,7 @@ class NotionService:
                 session,
                 standards_db_id,
                 sorts=[{"property": "Times Flagged", "direction": "descending"}],
+                token=self.settings.notion_token,
             )
             logs.append(f"Fetched {len(pages)} coding standards")
 
@@ -320,6 +324,7 @@ class NotionService:
                     "property": "Date",
                     "date": {"on_or_after": seven_days_ago.isoformat()},
                 },
+                token=self.settings.notion_token,
             )
             logs.append(f"Read {len(recent_pages)} review insights from last 7 days")
 

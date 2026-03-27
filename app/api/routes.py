@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from app.dependencies import get_review_service
 from app.schemas.review import (
     ReviewFileRequest,
+    ReviewGitHubPRRequest,
     ReviewPRRequest,
     ReviewResponse,
     SetupRequest,
@@ -45,6 +46,14 @@ async def review_pr(
     service: ReviewService = Depends(get_review_service),
 ) -> ReviewResponse:
     return await _wrap_errors(service.review_pr(payload))
+
+
+@router.post("/api/review-github-pr", response_model=ReviewResponse)
+async def review_github_pr(
+    payload: ReviewGitHubPRRequest,
+    service: ReviewService = Depends(get_review_service),
+) -> ReviewResponse:
+    return await _wrap_errors(service.review_github_pr(payload))
 
 
 @router.post("/api/review-file", response_model=ReviewResponse)

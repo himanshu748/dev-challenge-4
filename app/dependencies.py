@@ -44,4 +44,5 @@ def get_review_service() -> ReviewService:
         notion_service=get_notion_service(),
         state_store=get_state_store(),
         notion_parent_page_id=settings.notion_parent_page_id,
+        settings=settings,
     )

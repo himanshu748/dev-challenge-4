@@ -16,6 +16,12 @@ class ReviewPRRequest(BaseModel):
     repo: str
 
 
+class ReviewGitHubPRRequest(BaseModel):
+    owner: str
+    repo: str
+    pull_number: int
+
+
 class ReviewFileRequest(BaseModel):
     filename: str
     content: str
